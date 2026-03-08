@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pydantic-settings
+python-multipart
+cloudinary
+bcrypt
+python-jose
+groq
+pillow
+requests
+email-validator
