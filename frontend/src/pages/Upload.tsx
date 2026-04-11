@@ -1,8 +1,17 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { UploadCloud, Image as ImageIcon, X, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, X, CheckCircle2, Loader2, Sparkles, Zap } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { apiRequest } from '../lib/api';
+
+interface UploadResult {
+  photo_id: number;
+  image_url: string;
+  tags: string[];
+  caption: string;
+  quality_score?: number;
+  localPreview?: string;
+}
 
 export function Upload() {
   const [isDragging, setIsDragging] = useState(false);
@@ -10,6 +19,7 @@ export function Upload() {
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadComplete, setUploadComplete] = useState(false);
+  const [uploadResults, setUploadResults] = useState<UploadResult[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -48,18 +58,39 @@ export function Upload() {
     setIsUploading(true);
     setProgress(0);
     setUploadComplete(false);
+    setUploadResults([]);
     setError(null);
+
+    const results: UploadResult[] = [];
 
     try {
       let uploaded = 0;
       for (const file of files) {
         const form = new FormData();
         form.append('file', file);
-        await apiRequest('/photos/upload', { method: 'POST', body: form });
+        
+        const response = await apiRequest<{
+          photo_id: number;
+          image_url: string;
+          tags: string[];
+          caption: string;
+          quality_score?: number;
+        }>('/photos/upload', { method: 'POST', body: form });
+
+        results.push({
+          photo_id: response.photo_id,
+          image_url: response.image_url,
+          tags: response.tags || [],
+          caption: response.caption || '',
+          quality_score: response.quality_score,
+          localPreview: URL.createObjectURL(file),
+        });
+
         uploaded += 1;
         setProgress(Math.round((uploaded / files.length) * 100));
       }
 
+      setUploadResults(results);
       setUploadComplete(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed');
@@ -71,6 +102,7 @@ export function Upload() {
   const resetUpload = () => {
     setFiles([]);
     setUploadComplete(false);
+    setUploadResults([]);
     setProgress(0);
     setError(null);
   };
@@ -226,18 +258,91 @@ export function Upload() {
             key="success-state"
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#1A1A1A] rounded-3xl border border-white/10 p-12 text-center shadow-2xl relative overflow-hidden"
+            className="space-y-8"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 to-transparent pointer-events-none" />
-            <div className="w-32 h-32 mx-auto mb-8 rounded-full bg-green-500/20 flex items-center justify-center relative border border-green-500/30 shadow-[0_0_30px_rgba(34,197,94,0.3)]">
-              <div className="absolute inset-0 rounded-full bg-green-500/20 animate-ping" />
-              <CheckCircle2 className="w-16 h-16 text-green-400 relative z-10" />
+            {/* Success Header */}
+            <div className="bg-[#1A1A1A] rounded-3xl border border-white/10 p-12 text-center shadow-2xl relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 to-transparent pointer-events-none" />
+              <div className="w-32 h-32 mx-auto mb-8 rounded-full bg-green-500/20 flex items-center justify-center relative border border-green-500/30 shadow-[0_0_30px_rgba(34,197,94,0.3)]">
+                <div className="absolute inset-0 rounded-full bg-green-500/20 animate-ping" />
+                <CheckCircle2 className="w-16 h-16 text-green-400 relative z-10" />
+              </div>
+              <h2 className="text-4xl font-bold mb-4 text-[#E5E5E5]">Upload Complete!</h2>
+              <p className="text-[#A3A3A3] max-w-md mx-auto text-lg">
+                Successfully uploaded and processed {uploadResults.length} photo{uploadResults.length !== 1 ? 's' : ''}.
+              </p>
             </div>
-            <h2 className="text-4xl font-bold mb-4 text-[#E5E5E5]">Upload Complete!</h2>
-            <p className="text-[#A3A3A3] mb-10 max-w-md mx-auto text-lg">
-              Successfully uploaded and processed {files.length} photos.
-            </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 relative z-10">
+
+            {/* Results Gallery */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <AnimatePresence>
+                {uploadResults.map((result, index) => (
+                  <motion.div
+                    key={result.photo_id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    className="bg-[#1A1A1A] rounded-2xl border border-white/10 overflow-hidden shadow-xl hover:shadow-[0_0_30px_rgba(167,139,250,0.2)] transition-all hover:border-primary/50"
+                  >
+                    {/* Image Preview */}
+                    <div className="relative aspect-[4/3] overflow-hidden bg-[#0A0A0A]">
+                      <img
+                        src={result.image_url || result.localPreview}
+                        alt={result.caption || `Photo ${index + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      {result.quality_score !== undefined && (
+                        <div className="absolute top-4 right-4 px-3 py-2 rounded-lg bg-black/70 backdrop-blur-md border border-white/20 flex items-center gap-2">
+                          <Zap className="w-4 h-4 text-yellow-400" />
+                          <span className="text-sm font-semibold text-[#E5E5E5]">
+                            {result.quality_score.toFixed(1)}/10
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6 space-y-4">
+                      {/* Caption */}
+                      {result.caption && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-[#A3A3A3]">Caption</p>
+                          <p className="text-[#E5E5E5] line-clamp-3">{result.caption}</p>
+                        </div>
+                      )}
+
+                      {/* Tags */}
+                      {result.tags.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium text-[#A3A3A3]">Tags</p>
+                          <div className="flex flex-wrap gap-2">
+                            {result.tags.slice(0, 5).map((tag, i) => (
+                              <motion.span
+                                key={i}
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{ delay: i * 0.05 }}
+                                className="px-3 py-1 rounded-full bg-primary/20 border border-primary/50 text-xs font-medium text-primary hover:bg-primary/30 transition-colors cursor-default"
+                              >
+                                {tag}
+                              </motion.span>
+                            ))}
+                            {result.tags.length > 5 && (
+                              <span className="px-3 py-1 text-xs font-medium text-[#A3A3A3]">
+                                +{result.tags.length - 5} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
               <button
                 onClick={() => window.location.href = '/gallery'}
                 className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-primary to-secondary text-[#0A0A0A] font-bold hover:shadow-[0_0_20px_rgba(167,139,250,0.4)] transition-all active:scale-95"
