@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str | None = None
     CLOUDINARY_API_SECRET: str | None = None
 
-    GROQ_API_KEY: str | None = None
+    HUGGINGFACE_API_KEY: str | None = None
 
     # Keep this as a plain string to avoid pydantic-settings trying to JSON-decode it.
     # Accept either comma-separated values OR a JSON array string.

@@ -24,6 +24,7 @@ class PhotoOut(BaseModel):
 class PhotoUploadResponse(BaseModel):
     photo_id: int
     image_url: str
+    public_id: str
     tags: List[str]
     caption: str | None
     quality_score: int | None

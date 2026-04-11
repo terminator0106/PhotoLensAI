@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 # Placeholder for future embedding-based semantic search.
-# Current implementation uses Groq keyword extraction + tag matching.
+# Current implementation uses lightweight keyword extraction + tag matching.
 
 
 def embed_text(text: str):

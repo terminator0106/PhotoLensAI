@@ -7,7 +7,7 @@ python-multipart
 cloudinary
 bcrypt
 python-jose
-groq
+httpx
 pillow
 requests
 email-validator

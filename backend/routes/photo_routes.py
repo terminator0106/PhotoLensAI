@@ -23,7 +23,7 @@ from schemas.photo_schema import (
     TagCloudResponse,
     TimelineResponse,
 )
-from services.ai_service import analyze_upload_context
+from services.ai_service import generate_caption, generate_tags
 from services.cloudinary_service import delete_image, upload_image
 from services.duplicate_service import find_duplicate_groups
 from utils.auth_utils import get_current_user
@@ -138,19 +138,23 @@ async def upload_photo(
     if not image_url or not public_id:
         raise HTTPException(status_code=500, detail="Cloudinary upload failed")
 
-    ai = analyze_upload_context(filename=file.filename or "upload", latitude=latitude, longitude=longitude)
-    tags = ai.get("tags") or []
-    caption = ai.get("caption")
-    emotion = ai.get("emotion")
-    quality_score = ai.get("quality_score")
+    # AI enrichment (do not fail upload if AI fails)
+    caption = "Unable to analyze image"
+    tags: List[str] = []
+    try:
+        caption = await generate_caption(image_url)
+        tags = await generate_tags(image_url, top_k=5)
+    except Exception:
+        caption = "Unable to analyze image"
+        tags = []
 
     photo = Photo(
         user_id=current_user.id,
         image_url=image_url,
         public_id=public_id,
         caption=caption,
-        emotion=emotion,
-        quality_score=quality_score,
+        emotion=None,
+        quality_score=None,
         latitude=latitude,
         longitude=longitude,
         bytes=int(size_bytes) if size_bytes is not None else None,
@@ -166,6 +170,7 @@ async def upload_photo(
     return PhotoUploadResponse(
         photo_id=photo.id,
         image_url=photo.image_url,
+        public_id=photo.public_id,
         tags=_parse_tags(photo.tags),
         caption=photo.caption,
         quality_score=photo.quality_score,
