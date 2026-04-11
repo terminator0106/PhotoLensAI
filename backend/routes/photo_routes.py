@@ -105,9 +105,24 @@ async def upload_photo(
     if not file:
         raise HTTPException(status_code=400, detail="No file uploaded")
 
+    # Validate file type (mime type check)
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}. Only images are allowed.")
+
     contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file")
+
+    # Additional check: verify magic bytes for common image formats
+    image_signatures = {
+        b'\xFF\xD8\xFF': 'jpg',
+        b'\x89PNG\r\n\x1a\n': 'png',
+        b'RIFF': 'webp',
+        b'\x00\x00\x01\x00': 'ico',
+    }
+    is_valid_image = any(contents.startswith(sig) for sig in image_signatures.keys())
+    if not is_valid_image:
+        raise HTTPException(status_code=400, detail="Invalid image file. Ensure it is a valid JPG, PNG, WebP, or other supported format.")
 
     latitude, longitude = extract_gps_from_image_bytes(contents)
 
