@@ -21,7 +21,7 @@ export function MapView() {
       try {
         setIsLoading(true);
         setError(null);
-        const res = await apiRequest<MapPoint[]>('/memories/map', { method: 'GET' });
+        const res = await apiRequest<MapPoint[]>('/memories/map?format=legacy', { method: 'GET' });
         if (!cancelled) setPoints(res || []);
       } catch (e) {
         if (!cancelled) {

@@ -20,9 +20,11 @@ export interface Photo {
 interface PhotoCardProps {
   photo: Photo;
   className?: string;
+  onClick?: () => void;
+  onAddToAlbum?: () => void;
 }
 
-export function PhotoCard({ photo, className, onClick }: PhotoCardProps & { onClick?: () => void }) {
+export function PhotoCard({ photo, className, onClick, onAddToAlbum }: PhotoCardProps) {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
 
@@ -86,16 +88,42 @@ export function PhotoCard({ photo, className, onClick }: PhotoCardProps & { onCl
 
       {/* Hover Actions Overlay */}
       <div className="absolute top-0 left-0 right-0 p-4 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-b from-black/80 to-transparent z-10" style={{ transform: "translateZ(30px)" }}>
-        <button className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md text-[#E5E5E5] transition-colors" title="View">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+          className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md text-[#E5E5E5] transition-colors"
+          title="View"
+        >
           <Eye className="w-4 h-4" />
         </button>
-        <button className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md text-[#E5E5E5] transition-colors" title="Add to Album">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToAlbum?.();
+          }}
+          className="p-2 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md text-[#E5E5E5] transition-colors"
+          title="Add to Album"
+        >
           <FolderPlus className="w-4 h-4" />
         </button>
-        <button className="p-2 rounded-full bg-primary/20 hover:bg-primary/40 backdrop-blur-md text-primary transition-colors border border-primary/30" title="Generate Caption">
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="p-2 rounded-full bg-primary/20 hover:bg-primary/40 backdrop-blur-md text-primary transition-colors border border-primary/30"
+          title="Generate Caption"
+        >
           <Sparkles className="w-4 h-4" />
         </button>
-        <button className="p-2 rounded-full bg-red-500/20 hover:bg-red-500/40 backdrop-blur-md text-red-400 transition-colors" title="Delete">
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          className="p-2 rounded-full bg-red-500/20 hover:bg-red-500/40 backdrop-blur-md text-red-400 transition-colors"
+          title="Delete"
+        >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>

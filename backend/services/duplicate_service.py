@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from io import BytesIO
 from typing import Dict, List, Tuple
 
 import requests
+from PIL import Image
+import imagehash
 
 from models.photo_model import Photo
-from utils.image_utils import average_hash, hamming_distance_hex
 
 
 @dataclass
@@ -25,19 +27,41 @@ def _download(url: str, timeout: int = 15) -> bytes:
 
 def ensure_photo_hash(photo: Photo) -> str | None:
     if photo.phash:
-        return photo.phash
+        try:
+            # Validate the stored value is a pHash-compatible hex string.
+            imagehash.hex_to_hash(photo.phash)
+            return photo.phash
+        except Exception:
+            # Stored hash came from an older algorithm; recompute below.
+            pass
     try:
         content = _download(photo.image_url)
-        photo.phash = average_hash(content)
+        img = Image.open(BytesIO(content)).convert("RGB")
+        ph = imagehash.phash(img)  # 64-bit perceptual hash
+        photo.phash = str(ph)
         return photo.phash
     except Exception:
         return None
 
 
-def find_duplicate_groups(photos: List[Photo], *, max_distance: int = 6) -> Tuple[List[DuplicateGroupResult], int]:
-    """Groups photos by perceptual hash similarity.
+def _hash_distance(a_hex: str, b_hex: str) -> int:
+    # Use imagehash's own conversion to avoid assumptions about formatting.
+    ha = imagehash.hex_to_hash(a_hex)
+    hb = imagehash.hex_to_hash(b_hex)
+    return int(ha - hb)
 
-    max_distance is Hamming distance threshold for aHash. 0 means identical.
+
+def _distance_to_similarity_score(dist: int, *, bits: int = 64) -> int:
+    # Convert Hamming distance to a 0-100 similarity score.
+    dist = max(0, int(dist))
+    score = round((1.0 - (dist / float(bits))) * 100.0)
+    return int(max(0, min(100, score)))
+
+
+def find_duplicate_groups(photos: List[Photo], *, max_distance: int = 10) -> Tuple[List[DuplicateGroupResult], int]:
+    """Groups photos by perceptual hash similarity (pHash via ImageHash).
+
+    max_distance is the Hamming distance threshold for pHash. 0 means identical.
     Returns (groups, total_savings_bytes)
     """
 
@@ -64,14 +88,14 @@ def find_duplicate_groups(photos: List[Photo], *, max_distance: int = 6) -> Tupl
         for other_id in ids[i + 1 :]:
             if other_id in visited:
                 continue
-            dist = hamming_distance_hex(base_hash, hashes[other_id])
+            dist = _hash_distance(base_hash, hashes[other_id])
             if dist <= max_distance:
                 cluster.append(other_id)
                 visited.add(other_id)
 
         if len(cluster) >= 2:
-            # similarity: 1 - (dist / bits). We approximate using threshold.
-            similarity = 1.0 - (max_distance / 64.0)
+            # similarity is an approximate score derived from the threshold.
+            similarity = _distance_to_similarity_score(max_distance) / 100.0
             sizes = [photo_by_id[c].bytes or 0 for c in cluster]
             avg_size = int(sum(sizes) / len(sizes)) if any(sizes) else 0
             savings = max(0, (len(cluster) - 1) * avg_size)

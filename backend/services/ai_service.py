@@ -1,41 +1,29 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
-import httpx
+from huggingface_hub import AsyncInferenceClient
 
 from config.settings import settings
 
 
-HF_BASE_URL = "https://api-inference.huggingface.co/models/"
+logger = logging.getLogger(__name__)
+
 CAPTION_MODEL = "Salesforce/blip-image-captioning-base"
 TAGS_MODEL = "google/vit-base-patch16-224"
 
 
-def _auth_headers() -> dict[str, str]:
+def _hf_client(timeout_s: float = 30.0) -> AsyncInferenceClient:
     if not settings.HUGGINGFACE_API_KEY:
-        return {}
-    return {"Authorization": f"Bearer {settings.HUGGINGFACE_API_KEY}"}
-
-
-async def _hf_post_json(*, model: str, payload: dict[str, Any], timeout_s: float = 30.0) -> Any:
-    url = f"{HF_BASE_URL}{model}"
-    headers = {
-        **_auth_headers(),
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
-        res = await client.post(url, headers=headers, json=payload)
-
-    # Hugging Face often returns 503 while loading the model.
-    if res.status_code in {503, 504}:
-        raise RuntimeError(f"Hugging Face model loading/unavailable ({res.status_code})")
-
-    res.raise_for_status()
-    return res.json()
+        raise RuntimeError("HUGGINGFACE_API_KEY is not set")
+    # Use the supported Inference Providers client.
+    return AsyncInferenceClient(
+        provider="hf-inference",
+        api_key=settings.HUGGINGFACE_API_KEY,
+        timeout=timeout_s,
+    )
 
 
 async def generate_caption(image_url: str) -> str:
@@ -43,28 +31,63 @@ async def generate_caption(image_url: str) -> str:
 
     Returns a caption string. Raises on hard failures.
     """
-    data = await _hf_post_json(model=CAPTION_MODEL, payload={"inputs": image_url})
+    try:
+        client = _hf_client()
+        # AsyncInferenceClient supports URL inputs and handles binary downloads.
+        data = await client.image_to_text(image_url, model=CAPTION_MODEL)
+    except Exception as e:
+        # Many HF accounts/tokens cannot access image-to-text via hf-inference,
+        # and some models aren't available on this provider. Fall back to
+        # a lightweight caption derived from classification labels.
+        logger.warning("Hugging Face caption generation failed: %s", e)
 
-    # Expected formats:
+        try:
+            client = _hf_client(timeout_s=20.0)
+            preds = await client.image_classification(image_url, model=TAGS_MODEL, top_k=3)
+            if isinstance(preds, list) and preds:
+                first = preds[0]
+                if isinstance(first, dict) and first.get("label"):
+                    label = str(first["label"]).strip()
+                else:
+                    # huggingface_hub can return typed objects too
+                    label = str(getattr(first, "label", "") or "").strip()
+                if label:
+                    # Keep it simple and consistent.
+                    short = label.split(",")[0].strip()
+                    if short:
+                        return f"A photo of {short.lower()}"
+        except Exception as e2:
+            logger.warning("Hugging Face caption fallback classification failed: %s", e2)
+
+        return "Unable to analyze image"
+
+    caption: Optional[str] = None
+    # Common shapes:
     # - [{"generated_text": "..."}]
     # - {"generated_text": "..."}
-    caption: Optional[str] = None
     if isinstance(data, list) and data:
         first = data[0]
         if isinstance(first, dict) and "generated_text" in first:
             caption = str(first.get("generated_text") or "").strip()
-    elif isinstance(data, dict):
-        if "generated_text" in data:
-            caption = str(data.get("generated_text") or "").strip()
+    elif isinstance(data, dict) and "generated_text" in data:
+        caption = str(data.get("generated_text") or "").strip()
 
     return caption or "Unable to analyze image"
 
 
 async def generate_tags(image_url: str, *, top_k: int = 5) -> List[str]:
     """Generate basic tags (labels) from an image URL using ViT classification."""
-    data = await _hf_post_json(model=TAGS_MODEL, payload={"inputs": image_url})
+    try:
+        client = _hf_client()
+        data = await client.image_classification(
+            image_url,
+            model=TAGS_MODEL,
+            top_k=max(1, min(int(top_k), 10)),
+        )
+    except Exception as e:
+        logger.warning("Hugging Face tag generation failed: %s", e)
+        return []
 
-    # Expected format: [{"label": "...", "score": 0.9}, ...]
     labels: List[str] = []
     if isinstance(data, list):
         for item in data:

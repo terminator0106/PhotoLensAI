@@ -1,14 +1,72 @@
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Tag, Image as ImageIcon, Smile, Sparkles, Star, Info } from 'lucide-react';
 import { Photo } from './PhotoCard';
+import { PhotoCompareModal } from './PhotoCompareModal';
 
 export function PhotoInspector({ isOpen, onClose, photo }: { isOpen: boolean; onClose: () => void; photo: Photo | null }) {
   if (!photo) return null;
+
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancedUrl, setEnhancedUrl] = useState<string | null>(null);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsEnhancing(false);
+      setEnhancedUrl(null);
+      setEnhanceError(null);
+      setIsCompareOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    // Reset enhancement state when switching photos.
+    setIsEnhancing(false);
+    setEnhancedUrl(null);
+    setEnhanceError(null);
+    setIsCompareOpen(false);
+  }, [photo.id]);
+
+  const handleEnhance = async () => {
+    if (isEnhancing) return;
+    setEnhanceError(null);
+    setIsEnhancing(true);
+
+    let objectUrl: string | null = null;
+    try {
+      // Fetch to a same-origin blob URL to avoid canvas/CORS issues.
+      const res = await fetch(photo.url, { mode: 'cors' });
+      if (!res.ok) throw new Error(`Failed to fetch image (${res.status})`);
+      const blob = await res.blob();
+      objectUrl = URL.createObjectURL(blob);
+
+      const { default: Upscaler } = await import('upscaler');
+      const upscaler = new Upscaler();
+      const upscaled = await upscaler.upscale(objectUrl);
+
+      if (typeof upscaled !== 'string' || !upscaled) throw new Error('Upscale failed');
+      setEnhancedUrl(upscaled);
+      setIsCompareOpen(true);
+    } catch (e: any) {
+      setEnhanceError(e?.message || 'Image enhancement failed');
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setIsEnhancing(false);
+    }
+  };
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
+          <PhotoCompareModal
+            isOpen={isCompareOpen && !!enhancedUrl}
+            onClose={() => setIsCompareOpen(false)}
+            photo1={{ url: photo.url, caption: 'Original' }}
+            photo2={{ url: enhancedUrl || '', caption: 'Enhanced' }}
+          />
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -39,6 +97,25 @@ export function PhotoInspector({ isOpen, onClose, photo }: { isOpen: boolean; on
               </div>
 
               <div className="space-y-6">
+                <div className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5 hover:border-primary/30 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-[#A3A3A3]">
+                      <Sparkles className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-medium">Image Enhancement</span>
+                    </div>
+                    <button
+                      onClick={handleEnhance}
+                      disabled={isEnhancing}
+                      className="px-3 py-2 rounded-lg bg-primary/15 text-primary border border-primary/25 hover:bg-primary/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
+                    >
+                      {isEnhancing ? 'Enhancing…' : 'Enhance'}
+                    </button>
+                  </div>
+                  {enhanceError && (
+                    <p className="mt-3 text-sm text-red-400">{enhanceError}</p>
+                  )}
+                </div>
+
                 <div className="bg-[#1A1A1A] rounded-xl p-4 border border-white/5 hover:border-primary/30 transition-colors">
                   <div className="flex items-center gap-2 text-[#A3A3A3] mb-2">
                     <Info className="w-4 h-4" />

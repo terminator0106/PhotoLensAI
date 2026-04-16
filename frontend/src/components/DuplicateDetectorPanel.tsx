@@ -46,7 +46,7 @@ export function DuplicateDetectorPanel({ isOpen, onClose }: DuplicateDetectorPan
     setIsScanning(true);
     setError(null);
     try {
-      const res = await apiRequest<DuplicateResponse>('/photos/duplicates', { method: 'GET' });
+      const res = await apiRequest<DuplicateResponse>('/photos/duplicates?format=legacy', { method: 'GET' });
       setGroups(res.groups || []);
       setHasScanned(true);
     } catch (e) {

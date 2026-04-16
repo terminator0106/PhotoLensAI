@@ -22,6 +22,9 @@ class PhotoOut(BaseModel):
 
 
 class PhotoUploadResponse(BaseModel):
+    # DB id (Stage 4 requirement)
+    id: int
+    # Backward-compatible field used by existing frontend
     photo_id: int
     image_url: str
     public_id: str

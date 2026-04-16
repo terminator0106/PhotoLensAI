@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,10 +29,19 @@ def _parse_tags(tags_json: str) -> List[str]:
     try:
         data = json.loads(tags_json or "[]")
         if isinstance(data, list):
-            return [str(x) for x in data]
+            out: List[str] = []
+            for x in data:
+                s = str(x).strip().lower()
+                if s:
+                    out.append(s)
+            return out
     except Exception:
         pass
     return []
+
+
+def _tokenize(text: str) -> List[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if t]
 
 
 def _photo_to_out(photo: Photo) -> PhotoOut:
@@ -50,12 +60,112 @@ def _photo_to_out(photo: Photo) -> PhotoOut:
 
 
 SMART_ALBUMS: Dict[str, List[str]] = {
-    "Pets": ["dog", "cat", "pet", "puppy", "kitten"],
-    "Food": ["food", "meal", "dessert", "coffee", "restaurant"],
-    "Travel": ["travel", "trip", "beach", "mountain", "hotel", "flight"],
-    "Nature": ["nature", "sunset", "forest", "sea", "sky", "flowers"],
-    "Events": ["event", "wedding", "birthday", "party", "celebration"],
-    "Happy Moments": ["happy", "friends", "family", "smile", "fun"],
+    # Note: keywords are token-matched against both tags and caption.
+    # Keep these as single tokens (spaces are tokenized).
+    "Pets": [
+        "dog",
+        "cat",
+        "pet",
+        "puppy",
+        "kitten",
+        "retriever",
+        "labrador",
+        "poodle",
+        "bulldog",
+        "terrier",
+        "beagle",
+        "husky",
+        "shepherd",
+        "tabby",
+        "siamese",
+        "persian",
+        "rabbit",
+        "bunny",
+        "hamster",
+        "horse",
+        "pony",
+        "bird",
+        "parrot",
+        "fish",
+        "aquarium",
+    ],
+    "Food": [
+        "food",
+        "meal",
+        "restaurant",
+        "coffee",
+        "tea",
+        "pizza",
+        "burger",
+        "sandwich",
+        "sushi",
+        "pasta",
+        "noodle",
+        "cake",
+        "dessert",
+        "ice",
+        "cream",
+        "chocolate",
+        "breakfast",
+        "lunch",
+        "dinner",
+        "salad",
+    ],
+    "Travel": [
+        "travel",
+        "trip",
+        "vacation",
+        "beach",
+        "mountain",
+        "hotel",
+        "flight",
+        "airplane",
+        "airport",
+        "train",
+        "station",
+        "city",
+        "street",
+        "bridge",
+        "monument",
+        "temple",
+        "museum",
+        "tourist",
+        "tourism",
+    ],
+    "Nature": [
+        "nature",
+        "tree",
+        "sunset",
+        "forest",
+        "sea",
+        "ocean",
+        "sky",
+        "flower",
+        "flowers",
+        "lake",
+        "river",
+        "waterfall",
+        "mountain",
+        "landscape",
+        "garden",
+        "wildlife",
+    ],
+    "Events": [
+        "event",
+        "wedding",
+        "birthday",
+        "party",
+        "celebration",
+        "festival",
+        "ceremony",
+        "graduation",
+        "anniversary",
+        "concert",
+        "christmas",
+        "halloween",
+        "new",
+        "year",
+    ],
 }
 
 
@@ -102,14 +212,45 @@ def add_photo_to_album(payload: AddPhotoToAlbumRequest, current_user: User = Dep
 def smart_albums(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     photos = db.query(Photo).filter(Photo.user_id == current_user.id).order_by(Photo.created_at.desc()).all()
 
+    # Only cluster photos uploaded via this app to Cloudinary (default folder: privatelens/).
+    photos = [p for p in photos if (p.public_id or "").startswith("privatelens/")]
+
     albums = []
+    groups: Dict[str, List[PhotoOut]] = {name: [] for name in SMART_ALBUMS.keys()}
     for name, keywords in SMART_ALBUMS.items():
         matched = []
         for p in photos:
             tags = _parse_tags(p.tags)
-            if any(k in tags for k in keywords):
+            tag_tokens = set()
+            for t in tags:
+                tag_tokens.update(_tokenize(t))
+
+            caption_tokens = set(_tokenize(p.caption or ""))
+
+            # Allow clustering even when AI tags/caption are missing by also using the Cloudinary public_id
+            # (it usually contains the original filename).
+            public_id_tokens = set(_tokenize(p.public_id or ""))
+
+            # Match by token presence in tags OR caption OR public_id.
+            # Also allow a simple plural variant to reduce false negatives (e.g. dog/dogs).
+            is_match = False
+            for kw in keywords:
+                kw = (kw or "").strip().lower()
+                if not kw:
+                    continue
+                variants = {kw, f"{kw}s"}
+                if (
+                    any(v in tag_tokens for v in variants)
+                    or any(v in caption_tokens for v in variants)
+                    or any(v in public_id_tokens for v in variants)
+                ):
+                    is_match = True
+                    break
+
+            if is_match:
                 matched.append(_photo_to_out(p))
 
+        groups[name] = matched
         if matched:
             albums.append(
                 {
@@ -120,7 +261,8 @@ def smart_albums(current_user: User = Depends(get_current_user), db: Session = D
                 }
             )
 
-    return {"albums": albums}
+    # Keep existing `albums` list for current frontend, and add the Stage 6 mapping format.
+    return {"albums": albums, "groups": groups}
 
 
 @albums_router.get("/{album_id}", response_model=AlbumWithPhotos)

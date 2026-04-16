@@ -68,7 +68,7 @@ export function Upload() {
       for (const file of files) {
         const form = new FormData();
         form.append('file', file);
-        
+
         const response = await apiRequest<{
           photo_id: number;
           image_url: string;
@@ -143,11 +143,11 @@ export function Upload() {
                 multiple
                 accept="image/*"
                 onChange={handleFileInput}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
                 disabled={isUploading}
               />
 
-              <div className="relative z-10 flex flex-col items-center text-center p-6">
+              <div className="relative z-10 flex flex-col items-center text-center p-6 pointer-events-none">
                 <div className="w-20 h-20 mb-6 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 border border-primary/30 shadow-[0_0_20px_rgba(167,139,250,0.2)]">
                   <UploadCloud className="w-10 h-10 text-primary" />
                 </div>

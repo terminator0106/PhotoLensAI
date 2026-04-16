@@ -11,3 +11,5 @@ httpx
 pillow
 requests
 email-validator
+ImageHash
+huggingface_hub

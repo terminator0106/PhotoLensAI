@@ -11,6 +11,8 @@ from models.photo_model import Photo
 from models.user_model import User
 from schemas.photo_schema import PhotoOut
 from schemas.search_schema import PhotoSearchRequest, PhotoSearchResponse
+import re
+
 from services.ai_service import extract_keywords
 from utils.auth_utils import get_current_user
 
@@ -45,14 +47,41 @@ def _photo_to_out(photo: Photo) -> PhotoOut:
 
 @search_router.post("/photos", response_model=PhotoSearchResponse)
 def search_photos(payload: PhotoSearchRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Keep extract_keywords for backwards compatibility, but apply Stage 5 behavior:
+    # - ANY keyword match
+    # - rank by number of matching tags
+    raw = (payload.query or "").strip().lower()
     keywords = extract_keywords(payload.query)
+    if not keywords:
+        keywords = [k for k in re.split(r"[^a-zA-Z0-9]+", raw) if k]
+    keywords = keywords[:12]
 
-    # Simple keyword matching against stored JSON tags and caption.
-    # This is SQLite-friendly and works offline.
+    if not keywords:
+        return PhotoSearchResponse(keywords=[], photos=[])
+
     q = db.query(Photo).filter(Photo.user_id == current_user.id)
-    for kw in keywords[:10]:
+    any_filter = None
+    for kw in keywords:
         like = f"%{kw}%"
-        q = q.filter((Photo.tags.like(like)) | (Photo.caption.like(like)))
+        cond = (Photo.tags.like(like)) | (Photo.caption.like(like))
+        any_filter = cond if any_filter is None else (any_filter | cond)
+    if any_filter is not None:
+        q = q.filter(any_filter)
 
-    photos = q.order_by(Photo.created_at.desc()).limit(200).all()
-    return PhotoSearchResponse(keywords=keywords, photos=[_photo_to_out(p) for p in photos])
+    candidates = q.order_by(Photo.created_at.desc()).limit(400).all()
+
+    scored = []
+    for p in candidates:
+        tags = _parse_tags(p.tags)
+        tag_set = set([t.lower() for t in tags])
+        match_count = sum(1 for kw in keywords if kw in tag_set)
+        if match_count == 0 and p.caption:
+            cap = p.caption.lower()
+            if any(kw in cap for kw in keywords):
+                match_count = 1
+        scored.append((match_count, p))
+
+    scored.sort(key=lambda x: (x[0], x[1].created_at), reverse=True)
+    photos = [_photo_to_out(photo) for score, photo in scored[:200] if score > 0]
+
+    return PhotoSearchResponse(keywords=keywords, photos=photos)

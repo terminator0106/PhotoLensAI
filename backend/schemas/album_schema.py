@@ -40,3 +40,5 @@ class SmartAlbum(BaseModel):
 
 class SmartAlbumsResponse(BaseModel):
     albums: List[SmartAlbum]
+    # Stage 6 format (map of album name -> photos)
+    groups: dict[str, List[PhotoOut]] = Field(default_factory=dict)

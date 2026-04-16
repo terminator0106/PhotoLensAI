@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { SearchBar } from '../components/SearchBar';
 import { PhotoCard, Photo } from '../components/PhotoCard';
-import { Star, Tag, LayoutGrid, Search, Wand2, Copy, Activity, SlidersHorizontal } from 'lucide-react';
+import { Star, Tag, LayoutGrid, Search, Wand2, Copy, Activity, SlidersHorizontal, X, FolderPlus } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { StoryGenerator } from '../components/StoryGenerator';
 import { DuplicateDetectorPanel } from '../components/DuplicateDetectorPanel';
@@ -33,6 +34,13 @@ type AIInsightsResponse = {
   mood_distribution: Record<string, number>;
 };
 
+type AlbumOut = {
+  id: number;
+  name: string;
+  cover_image: string | null;
+  created_at: string;
+};
+
 function toUiPhoto(p: BackendPhotoOut, bestIds?: Set<string>): Photo {
   const id = String(p.id);
   const createdAt = p.created_at ? new Date(p.created_at) : null;
@@ -58,6 +66,9 @@ const filters = [
 ];
 
 export function Gallery() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
@@ -71,6 +82,94 @@ export function Gallery() {
   const [displayPhotos, setDisplayPhotos] = useState<Photo[]>([]);
   const [bestIds, setBestIds] = useState<Set<string>>(new Set());
   const [insights, setInsights] = useState<AIInsightsResponse | null>(null);
+
+  const [isAddToAlbumOpen, setIsAddToAlbumOpen] = useState(false);
+  const [albumList, setAlbumList] = useState<AlbumOut[]>([]);
+  const [albumListError, setAlbumListError] = useState<string | null>(null);
+  const [isAlbumListLoading, setIsAlbumListLoading] = useState(false);
+  const [albumIdToAdd, setAlbumIdToAdd] = useState<number | ''>('');
+  const [photoToAdd, setPhotoToAdd] = useState<Photo | null>(null);
+  const [addAlbumMessage, setAddAlbumMessage] = useState<string | null>(null);
+
+  const [quickAddAlbumId, setQuickAddAlbumId] = useState<number | null>(null);
+  const [quickAddAlbumName, setQuickAddAlbumName] = useState<string>('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const rawId = (params.get('addToAlbum') || '').trim();
+    const rawName = (params.get('albumName') || '').trim();
+
+    const id = rawId ? Number(rawId) : NaN;
+    if (rawId && Number.isFinite(id) && id > 0) {
+      setQuickAddAlbumId(id);
+      setQuickAddAlbumName(rawName);
+    } else {
+      setQuickAddAlbumId(null);
+      setQuickAddAlbumName('');
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!addAlbumMessage) return;
+    const t = window.setTimeout(() => setAddAlbumMessage(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [addAlbumMessage]);
+
+  async function loadAlbums() {
+    setIsAlbumListLoading(true);
+    setAlbumListError(null);
+    try {
+      const res = await apiRequest<AlbumOut[]>('/albums', { method: 'GET' });
+      setAlbumList(res || []);
+    } catch (e) {
+      setAlbumList([]);
+      setAlbumListError(e instanceof Error ? e.message : 'Failed to load albums');
+    } finally {
+      setIsAlbumListLoading(false);
+    }
+  }
+
+  async function addPhotoToAlbum(photoId: number, albumId: number) {
+    await apiRequest<{ added: boolean }>('/albums/add-photo', {
+      method: 'POST',
+      body: JSON.stringify({ photo_id: photoId, album_id: albumId }),
+    });
+  }
+
+  function openAddToAlbum(photo: Photo) {
+    setPhotoToAdd(photo);
+    setAlbumIdToAdd('');
+    setIsAddToAlbumOpen(true);
+    void loadAlbums();
+  }
+
+  function closeAddToAlbum() {
+    setIsAddToAlbumOpen(false);
+    setPhotoToAdd(null);
+    setAlbumIdToAdd('');
+    setAlbumListError(null);
+  }
+
+  async function handleConfirmAddToAlbum() {
+    if (!photoToAdd) return;
+    if (albumIdToAdd === '') {
+      setAlbumListError('Please choose an album.');
+      return;
+    }
+
+    try {
+      await addPhotoToAlbum(Number(photoToAdd.id), Number(albumIdToAdd));
+      setAddAlbumMessage(`Added to album successfully.`);
+      closeAddToAlbum();
+
+      // If we're in "quick add" mode for the same album, keep the banner visible.
+      if (quickAddAlbumId && Number(albumIdToAdd) === quickAddAlbumId) {
+        // no-op
+      }
+    } catch (e) {
+      setAlbumListError(e instanceof Error ? e.message : 'Failed to add photo to album');
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +296,36 @@ export function Gallery() {
 
   return (
     <div className="container mx-auto px-4 py-24">
+      {addAlbumMessage && (
+        <div className="mb-6 p-4 rounded-xl bg-green-500/10 border border-green-500/20 text-green-200">
+          {addAlbumMessage}
+        </div>
+      )}
+
+      {quickAddAlbumId && (
+        <div className="mb-6 p-4 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 w-9 h-9 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center">
+              <FolderPlus className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-semibold">Add photos to album</div>
+              <div className="text-sm text-[#A3A3A3]">
+                Click “Add to Album” on any photo to add it to <span className="text-[#E5E5E5] font-semibold">{quickAddAlbumName || `#${quickAddAlbumId}`}</span>.
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/gallery', { replace: true })}
+            className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[#E5E5E5]"
+            title="Exit add-to-album mode"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="mb-12 text-center">
         <h1 className="text-4xl font-bold mb-8">Your Gallery</h1>
         <SearchBar onSearch={setSearchQuery} />
@@ -300,6 +429,18 @@ export function Gallery() {
                     <PhotoCard
                       photo={photo}
                       onClick={() => handlePhotoClick(photo)}
+                      onAddToAlbum={async () => {
+                        if (quickAddAlbumId) {
+                          try {
+                            await addPhotoToAlbum(Number(photo.id), quickAddAlbumId);
+                            setAddAlbumMessage(`Added to ${quickAddAlbumName || 'album'}.`);
+                          } catch (e) {
+                            setLoadError(e instanceof Error ? e.message : 'Failed to add photo to album');
+                          }
+                          return;
+                        }
+                        openAddToAlbum(photo);
+                      }}
                       className={isSelectedForCompare ? 'ring-2 ring-primary ring-offset-2 ring-offset-[#0A0A0A]' : ''}
                     />
                     {isSelectedForCompare && (
@@ -385,6 +526,92 @@ export function Gallery() {
           </div>
         </div>
       </div>
+
+      {isAddToAlbumOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50"
+            onClick={closeAddToAlbum}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-[#0A0A0A] border border-white/10 shadow-2xl overflow-hidden">
+              <div className="p-5 bg-[#1A1A1A] border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-[#E5E5E5] font-bold">
+                  <FolderPlus className="w-5 h-5 text-primary" />
+                  Add photo to album
+                </div>
+                <button
+                  type="button"
+                  onClick={closeAddToAlbum}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[#E5E5E5]"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {photoToAdd && (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={photoToAdd.url}
+                      alt="To add"
+                      className="w-16 h-16 rounded-xl object-cover border border-white/10"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-[#E5E5E5] font-semibold truncate">{photoToAdd.caption}</div>
+                      <div className="text-sm text-[#A3A3A3] truncate">#{photoToAdd.id}</div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-[#A3A3A3] mb-2">Choose album</label>
+                  <select
+                    value={albumIdToAdd}
+                    onChange={(e) => setAlbumIdToAdd(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full px-4 py-3 rounded-xl bg-[#0A0A0A] border border-white/10 text-[#E5E5E5] focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    disabled={isAlbumListLoading}
+                  >
+                    <option value="">Select an album…</option>
+                    {albumList.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                  {isAlbumListLoading && <div className="mt-2 text-sm text-[#A3A3A3]">Loading albums…</div>}
+                  {!isAlbumListLoading && albumList.length === 0 && (
+                    <div className="mt-2 text-sm text-[#A3A3A3]">No albums yet. Create one in Albums first.</div>
+                  )}
+                  {albumListError && (
+                    <div className="mt-2 text-sm text-red-300">{albumListError}</div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeAddToAlbum}
+                    className="px-5 py-3 rounded-xl bg-white/10 text-[#E5E5E5] font-semibold border border-white/10 hover:bg-white/15"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmAddToAlbum}
+                    className="px-5 py-3 rounded-xl bg-primary text-[#0A0A0A] font-bold disabled:opacity-60"
+                    disabled={isAlbumListLoading || !photoToAdd}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <StoryGenerator
         isOpen={isStoryModalOpen}

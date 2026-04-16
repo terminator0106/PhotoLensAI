@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config.database import Base, engine
 from config.settings import settings
@@ -15,6 +16,12 @@ from services.cloudinary_service import ensure_cloudinary_configured
 
 
 app = FastAPI(title="PrivateLens – Offline AI Photo Organizer")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Avoid leaking internal details by default.
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 app.add_middleware(
     CORSMiddleware,
