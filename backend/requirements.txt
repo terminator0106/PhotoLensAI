@@ -13,3 +13,4 @@ requests
 email-validator
 ImageHash
 huggingface_hub
+google-genai

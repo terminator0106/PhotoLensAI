@@ -32,8 +32,16 @@ class GenerateStoryRequest(BaseModel):
             raise ValueError("Provide either photo_ids or photos")
 
 
+class StoryPage(BaseModel):
+    page: int
+    text: str
+    image_index: int
+    image_url: Optional[str] = None
+
+
 class GenerateStoryResponse(BaseModel):
-    story: str
+    story: str  # Kept for backward compatibility or raw text fallback
+    pages: Optional[List[StoryPage]] = None
 
 
 class AIInsightsResponse(BaseModel):

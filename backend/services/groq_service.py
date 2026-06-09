@@ -73,9 +73,14 @@ async def generate_story_groq(
     captions_clean = captions_clean[:30]
 
     base_prompt = (
-        "Create a short emotional story from these moments. "
-        "Write 1-3 paragraphs, vivid but grounded, no bullet points.\n\n"
-        f"Moments: {captions_clean}"
+        "Create a short emotional storybook based on these listed photo moments. "
+        "The story should be structured as exactly 5 distinct pages. "
+        "Each page MUST strictly follow this JSON format:\n"
+        '{"page": 1, "text": "Content for page 1...", "image_index": 0}\n'
+        "Wait! Return the result as a JSON array of 5 page objects. "
+        "Each 'text' should be 2-3 sentences of descriptive scenario. "
+        "The 'image_index' should refer to the index of the photo in the provided list that best matches that part of the story.\n\n"
+        f"Photo Moments: {captions_clean}"
     )
     if prompt and prompt.strip():
         base_prompt = f"{prompt.strip()}\n\n{base_prompt}"
@@ -89,9 +94,9 @@ async def generate_story_groq(
                 {
                     "role": "system",
                     "content": (
-                        "You are a helpful creative writing assistant. "
-                        "Return ONLY the story text. "
-                        "Do not include analysis, planning, or <think> blocks."
+                        "You are a professional storybook writer and JSON assistant. "
+                        "Return ONLY a raw JSON array of 5 page objects. "
+                        "Do not include markdown code blocks, apologies, or any intro/outro text."
                     ),
                 },
                 {"role": "user", "content": base_prompt},

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -149,6 +150,9 @@ SMART_ALBUMS: Dict[str, List[str]] = {
         "landscape",
         "garden",
         "wildlife",
+        "outdoor",
+        "scenery",
+        "beach",
     ],
     "Events": [
         "event",
@@ -212,11 +216,13 @@ def add_photo_to_album(payload: AddPhotoToAlbumRequest, current_user: User = Dep
 def smart_albums(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     photos = db.query(Photo).filter(Photo.user_id == current_user.id).order_by(Photo.created_at.desc()).all()
 
-    # Only cluster photos uploaded via this app to Cloudinary (default folder: privatelens/).
-    photos = [p for p in photos if (p.public_id or "").startswith("privatelens/")]
+    # Smart albums focus on photos uploaded to Cloudinary
+    photos = [p for p in photos if p.public_id and "/" in p.public_id]
 
     albums = []
     groups: Dict[str, List[PhotoOut]] = {name: [] for name in SMART_ALBUMS.keys()}
+    
+    # 1. Match against predefined SMART_ALBUMS categories
     for name, keywords in SMART_ALBUMS.items():
         matched = []
         for p in photos:
@@ -224,44 +230,60 @@ def smart_albums(current_user: User = Depends(get_current_user), db: Session = D
             tag_tokens = set()
             for t in tags:
                 tag_tokens.update(_tokenize(t))
-
             caption_tokens = set(_tokenize(p.caption or ""))
-
-            # Allow clustering even when AI tags/caption are missing by also using the Cloudinary public_id
-            # (it usually contains the original filename).
             public_id_tokens = set(_tokenize(p.public_id or ""))
 
-            # Match by token presence in tags OR caption OR public_id.
-            # Also allow a simple plural variant to reduce false negatives (e.g. dog/dogs).
             is_match = False
             for kw in keywords:
                 kw = (kw or "").strip().lower()
-                if not kw:
-                    continue
+                if not kw: continue
                 variants = {kw, f"{kw}s"}
-                if (
-                    any(v in tag_tokens for v in variants)
-                    or any(v in caption_tokens for v in variants)
-                    or any(v in public_id_tokens for v in variants)
-                ):
+                if (any(v in tag_tokens for v in variants) or 
+                    any(v in caption_tokens for v in variants) or 
+                    any(v in public_id_tokens for v in variants)):
                     is_match = True
                     break
-
             if is_match:
                 matched.append(_photo_to_out(p))
 
         groups[name] = matched
         if matched:
-            albums.append(
-                {
-                    "name": name,
-                    "cover_image": matched[0].image_url,
-                    "photo_count": len(matched),
-                    "photos": matched[:100],
-                }
-            )
+            albums.append({
+                "name": name,
+                "cover_image": matched[0].image_url,
+                "photo_count": len(matched),
+                "photos": matched[:100],
+            })
 
-    # Keep existing `albums` list for current frontend, and add the Stage 6 mapping format.
+    # 2. Dynamic clustering by frequent keywords in AI Captions
+    # This creates albums like "Beach Photos", "City Life", etc., based on common descriptions.
+    caption_words: Dict[str, List[Photo]] = defaultdict(list)
+    stop_words = {"a", "the", "in", "on", "at", "to", "for", "with", "and", "is", "of", "photo"}
+    
+    for p in photos:
+        # Extract meaningful nouns from captions (e.g. "A photo of a dog in a park")
+        tokens = [t for t in _tokenize(p.caption) if len(t) > 3 and t not in stop_words]
+        for token in set(tokens): # uniquely per photo
+            caption_words[token].append(p)
+            
+    # Keep only clusters with at least 3 photos
+    for word, cluster_photos in caption_words.items():
+        if len(cluster_photos) >= 3:
+            album_name = f"{word.capitalize()} Moments"
+            # Avoid duplicating predefined albums
+            if any(a["name"].lower() == album_name.lower() or a["name"].lower() == word.lower() for a in albums):
+                continue
+                
+            matched_out = [_photo_to_out(p) for p in cluster_photos]
+            albums.append({
+                "name": album_name,
+                "cover_image": matched_out[0].image_url,
+                "photo_count": len(matched_out),
+                "photos": matched_out[:100],
+            })
+            # Also add to groups for specific frontend filters
+            groups[album_name] = matched_out
+
     return {"albums": albums, "groups": groups}
 
 

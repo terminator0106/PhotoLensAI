@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from collections import defaultdict
@@ -21,6 +22,7 @@ from schemas.photo_schema import (
     MapPoint,
     PhotoOut,
     PhotoUploadResponse,
+    SaveEnhancedPhotoRequest,
     TagCloudResponse,
     TimelineResponse,
 )
@@ -159,6 +161,103 @@ async def upload_photo(
         quality_score=0,
         latitude=latitude,
         longitude=longitude,
+        bytes=int(size_bytes) if size_bytes is not None else None,
+        created_at=datetime.utcnow(),
+    )
+    _set_tags(photo, tags)
+
+    db.add(photo)
+    _bump_tag_frequencies(db, _parse_tags(photo.tags))
+    db.commit()
+    db.refresh(photo)
+
+    return PhotoUploadResponse(
+        id=photo.id,
+        photo_id=photo.id,
+        image_url=photo.image_url,
+        public_id=photo.public_id,
+        tags=_parse_tags(photo.tags),
+        caption=photo.caption,
+        quality_score=photo.quality_score,
+    )
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    raw = (data_url or "").strip()
+    if not raw.startswith("data:"):
+        raise HTTPException(status_code=400, detail="enhanced_data_url must be a data: URL")
+
+    try:
+        header, b64 = raw.split(",", 1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid data URL")
+
+    if ";base64" not in header.lower():
+        raise HTTPException(status_code=400, detail="Data URL must be base64 encoded")
+
+    mime = header[5:].split(";", 1)[0].strip().lower()
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Data URL must be an image")
+
+    try:
+        return base64.b64decode(b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 image data")
+
+
+@photos_router.post("/save-enhanced", response_model=PhotoUploadResponse)
+async def save_enhanced_photo(
+    payload: SaveEnhancedPhotoRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    original = (
+        db.query(Photo)
+        .filter(Photo.user_id == current_user.id, Photo.id == int(payload.original_photo_id))
+        .first()
+    )
+    if not original:
+        raise HTTPException(status_code=404, detail="Original photo not found")
+
+    img_bytes = _decode_data_url(payload.enhanced_data_url)
+    if not img_bytes:
+        raise HTTPException(status_code=400, detail="Empty enhanced image")
+
+    # Basic image signature check (same set as /upload)
+    image_signatures = {
+        b"\xFF\xD8\xFF": "jpg",
+        b"\x89PNG\r\n\x1a\n": "png",
+        b"RIFF": "webp",
+        b"\x00\x00\x01\x00": "ico",
+    }
+    is_valid_image = any(img_bytes.startswith(sig) for sig in image_signatures.keys())
+    if not is_valid_image:
+        raise HTTPException(status_code=400, detail="Invalid enhanced image data")
+
+    try:
+        cloud_res = upload_image(file_bytes=img_bytes, filename=f"enhanced_{original.id}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    image_url = cloud_res.get("secure_url") or cloud_res.get("url")
+    public_id = cloud_res.get("public_id")
+    size_bytes = cloud_res.get("bytes")
+    if not image_url or not public_id:
+        raise HTTPException(status_code=500, detail="Cloudinary upload failed")
+
+    # Create a new photo entry (keep original metadata where available)
+    caption = (original.caption or "").strip() or "Enhanced photo"
+    tags = _parse_tags(original.tags)
+
+    photo = Photo(
+        user_id=current_user.id,
+        image_url=image_url,
+        public_id=public_id,
+        caption=caption,
+        emotion=original.emotion,
+        quality_score=original.quality_score,
+        latitude=original.latitude,
+        longitude=original.longitude,
         bytes=int(size_bytes) if size_bytes is not None else None,
         created_at=datetime.utcnow(),
     )

@@ -93,3 +93,9 @@ class DeletePhotoResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     extra: Any | None = None
+
+
+class SaveEnhancedPhotoRequest(BaseModel):
+    original_photo_id: int
+    enhanced_data_url: str
+

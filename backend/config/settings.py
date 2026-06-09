@@ -35,6 +35,26 @@ class Settings(BaseSettings):
 
     HUGGINGFACE_API_KEY: str | None = None
 
+    # Gemini (Image enhancement)
+    GEMINI_API_KEY: str | None = None
+    # Model name can change over time; keep it configurable.
+    GEMINI_IMAGE_MODEL: str = Field(default="gemini-2.5-flash-image")
+    GEMINI_IMAGE_ENHANCE_PROMPT: str | None = None
+
+    # If true, use Vertex AI (billed quota) instead of API key.
+    # Requires Google Cloud project + ADC credentials.
+    GEMINI_USE_VERTEXAI: bool = Field(default=False)
+    GOOGLE_CLOUD_PROJECT: str | None = None
+    GOOGLE_CLOUD_LOCATION: str | None = None
+    # Optional convenience: point to a service account JSON file.
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = None
+
+    # Image enhancement provider
+    # - "local": free/offline enhancement (no external API)
+    # - "gemini": use Gemini/Vertex (requires quota/billing)
+    ENHANCE_PROVIDER: str = Field(default="local")
+    LOCAL_ENHANCE_SCALE: int = Field(default=2)
+
     # Stage 7
     GROQ_API_KEY: str | None = None
 

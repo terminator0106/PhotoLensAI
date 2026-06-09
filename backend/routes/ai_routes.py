@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from config.settings import settings
 from models.photo_model import Photo
 from models.user_model import User
 from schemas.ai_schema import (
@@ -19,8 +20,10 @@ from schemas.ai_schema import (
     GenerateStoryResponse,
 )
 from services.ai_service import generate_story as generate_story_offline
+from services.gemini_image_service import GeminiImageError, enhance_image_to_data_url as enhance_image_to_data_url_gemini
 from services.groq_service import generate_story_groq
 from services.duplicate_service import find_duplicate_groups
+from services.local_enhance_service import LocalEnhanceError, enhance_image_to_data_url as enhance_image_to_data_url_local
 from utils.auth_utils import get_current_user
 
 
@@ -42,6 +45,7 @@ async def generate_story_route(payload: GenerateStoryRequest, current_user: User
     # Support both legacy input (photo_ids) and Stage 7 input (photos).
     summaries = []
     captions: list[str] = []
+    photo_urls: list[str] = []
 
     if payload.photos:
         for i, p in enumerate(payload.photos[:30]):
@@ -70,16 +74,37 @@ async def generate_story_route(payload: GenerateStoryRequest, current_user: User
                     "date": p.created_at.isoformat(),
                 }
             )
+            photo_urls.append(p.image_url)
             if p.caption:
                 captions.append(p.caption)
 
     # Prefer Groq when configured; fallback to offline generator.
     try:
-        story = await generate_story_groq(captions=captions, prompt=payload.prompt)
+        story_raw = await generate_story_groq(captions=captions, prompt=payload.prompt)
+        # Attempt to parse as structured story pages
+        from schemas.ai_schema import StoryPage
+        
+        try:
+            pages_data = json.loads(story_raw)
+            if isinstance(pages_data, list):
+                pages = []
+                for p_data in pages_data:
+                    idx = p_data.get("image_index", 0)
+                    url = photo_urls[idx] if 0 <= idx < len(photo_urls) else (photo_urls[0] if photo_urls else None)
+                    pages.append(StoryPage(
+                        page=p_data.get("page", 1),
+                        text=p_data.get("text", ""),
+                        image_index=idx,
+                        image_url=url
+                    ))
+                return GenerateStoryResponse(story=story_raw, pages=pages)
+        except Exception:
+            # Fallback to plain story if JSON parsing fails
+            return GenerateStoryResponse(story=story_raw)
+            
     except Exception:
         story = generate_story_offline(photo_summaries=summaries, prompt=payload.prompt)
-
-    return GenerateStoryResponse(story=story)
+        return GenerateStoryResponse(story=story)
 
 
 @ai_router.post("/enhance-image", response_model=EnhanceImageResponse)
@@ -88,10 +113,29 @@ async def enhance_image(payload: EnhanceImageRequest, current_user: User = Depen
     if not image_url:
         raise HTTPException(status_code=400, detail="image_url is required")
 
-    # Replicate-based enhancement was removed. Enhancement is now performed client-side.
-    raise HTTPException(
-        status_code=410,
-        detail="Image enhancement has moved to the frontend (UpscalerJS). This endpoint is deprecated.",
+    provider = (settings.ENHANCE_PROVIDER or "local").strip().lower()
+    try:
+        if provider == "gemini":
+            enhanced_data_url = await enhance_image_to_data_url_gemini(image_url)
+            prediction_id = "gemini"
+        else:
+            enhanced_data_url = await enhance_image_to_data_url_local(image_url)
+            prediction_id = "local"
+    except LocalEnhanceError as e:
+        raise HTTPException(status_code=502, detail=str(e) or "Local enhancement failed")
+    except GeminiImageError as e:
+        msg = str(e) or "Gemini enhancement failed"
+        raise HTTPException(status_code=503, detail=msg)
+    except Exception as e:
+        msg = str(e) or "Enhancement failed"
+        if settings.ENV.lower() == "dev":
+            raise HTTPException(status_code=502, detail=msg)
+        raise HTTPException(status_code=502, detail="Enhancement failed")
+
+    return EnhanceImageResponse(
+        enhanced_image_url=enhanced_data_url,
+        status="done",
+        prediction_id=prediction_id,
     )
 
 

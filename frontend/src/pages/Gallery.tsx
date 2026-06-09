@@ -628,6 +628,10 @@ export function Gallery() {
         isOpen={!!selectedPhoto && !isCompareMode}
         onClose={() => setSelectedPhoto(null)}
         photo={selectedPhoto}
+        onPhotoSaved={(saved) => {
+          setAllPhotos((prev) => [saved, ...prev]);
+          setDisplayPhotos((prev) => [saved, ...prev]);
+        }}
       />
 
       <PhotoCompareModal
