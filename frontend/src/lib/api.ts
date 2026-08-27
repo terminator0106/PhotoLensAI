@@ -7,7 +7,7 @@ function computeDefaultApiBase(): string {
     return 'http://localhost:8000';
 }
 
-export const API_BASE = String(import.meta.env.VITE_API_BASE || computeDefaultApiBase()).replace(/\/+$/, '');
+export const API_BASE = 'https://photolensai.onrender.com';
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
