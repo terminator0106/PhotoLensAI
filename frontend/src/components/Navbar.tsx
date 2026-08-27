@@ -81,7 +81,7 @@ export function Navbar() {
               <Camera className="w-5 h-5 text-[#E5E5E5] group-hover:text-primary transition-colors relative z-10" />
             </div>
             <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#E5E5E5] to-[#A3A3A3] group-hover:to-primary transition-all">
-              PrivateLens
+              PhotoLens
             </span>
           </Link>
 
