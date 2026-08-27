@@ -26,8 +26,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60 * 24 * 7)  # 7 days
 
     COOKIE_NAME: str = Field(default="privatelens_token")
-    COOKIE_SECURE: bool = Field(default=False)
-    COOKIE_SAMESITE: str = Field(default="lax")
+    # In production (HTTPS, cross-site) cookies must be Secure + SameSite=none.
+    # Override via env vars; defaults flip automatically when ENV=prod.
+    COOKIE_SECURE: bool | None = Field(default=None)
+    COOKIE_SAMESITE: str | None = Field(default=None)
 
     CLOUDINARY_CLOUD_NAME: str | None = None
     CLOUDINARY_API_KEY: str | None = None
@@ -60,9 +62,33 @@ class Settings(BaseSettings):
 
     # Keep this as a plain string to avoid pydantic-settings trying to JSON-decode it.
     # Accept either comma-separated values OR a JSON array string.
+    # Production Vercel frontend is always allowed; localhost variants for dev.
     CORS_ORIGINS: str = Field(
-        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+        default=(
+            "http://localhost:5173,http://127.0.0.1:5173,"
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "https://photo-lens-ai.vercel.app,"
+            "https://ai-interview-coach-beta.vercel.app"
+        )
     )
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENV.lower() in ("prod", "production")
+
+    @property
+    def effective_cookie_secure(self) -> bool:
+        """Cookies must be Secure=True in production (HTTPS cross-site)."""
+        if self.COOKIE_SECURE is not None:
+            return self.COOKIE_SECURE
+        return self.is_production
+
+    @property
+    def effective_cookie_samesite(self) -> str:
+        """Cross-site (Vercel ↔ Render) requests require SameSite=none."""
+        if self.COOKIE_SAMESITE is not None:
+            return self.COOKIE_SAMESITE
+        return "none" if self.is_production else "lax"
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -74,11 +100,12 @@ class Settings(BaseSettings):
             try:
                 data = json.loads(raw)
                 if isinstance(data, list):
-                    return [str(x).strip() for x in data if str(x).strip()]
+                    # Strip trailing slashes — browsers send origins without them.
+                    return [str(x).strip().rstrip("/") for x in data if str(x).strip()]
             except Exception:
                 pass
 
-        return [item.strip() for item in raw.split(",") if item.strip()]
+        return [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
 
 
 settings = Settings()

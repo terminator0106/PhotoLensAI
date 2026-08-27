@@ -36,8 +36,8 @@ def signup(payload: UserCreate, response: Response, db: Session = Depends(get_db
         key=settings.COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
+        secure=settings.effective_cookie_secure,
+        samesite=settings.effective_cookie_samesite,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
@@ -56,8 +56,8 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
         key=settings.COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
-        samesite=settings.COOKIE_SAMESITE,
+        secure=settings.effective_cookie_secure,
+        samesite=settings.effective_cookie_samesite,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
