@@ -3,12 +3,17 @@ import type { FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Mail, Lock, Chrome, User, AlertCircle, Loader2 } from 'lucide-react';
 import { apiRequest } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 interface AuthUser {
   id: number;
   name: string;
   email: string;
   created_at: string;
+}
+
+interface AuthResponse extends AuthUser {
+  token: string;
 }
 
 interface AuthModalProps {
@@ -19,6 +24,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ isOpen, onClose, initialMode = 'login', onSuccess }: AuthModalProps) {
+  const { saveAuthToken } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -59,10 +65,15 @@ export function AuthModal({ isOpen, onClose, initialMode = 'login', onSuccess }:
         ? { email, password }
         : { name: name.trim(), email, password };
 
-      const data = await apiRequest<AuthUser>(endpoint, {
+      const data = await apiRequest<AuthResponse>(endpoint, {
         method: 'POST',
         body: JSON.stringify(body),
       });
+
+      // Save the JWT so all future requests are authenticated
+      if (data.token) {
+        saveAuthToken(data.token);
+      }
 
       onSuccess?.(data);
       onClose();
@@ -73,6 +84,7 @@ export function AuthModal({ isOpen, onClose, initialMode = 'login', onSuccess }:
       setLoading(false);
     }
   };
+
 
   return (
     <AnimatePresence>

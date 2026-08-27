@@ -45,3 +45,13 @@ class UserOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UserOutWithToken(UserOut):
+    """Returned by login/signup so the frontend can store the JWT in localStorage.
+
+    Using localStorage + Authorization Bearer header is the only reliable
+    cross-domain auth strategy (avoids SameSite cookie restrictions between
+    Vercel and Render).
+    """
+    token: str

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from config.database import get_db
 from config.settings import settings
 from models.user_model import User
-from schemas.user_schema import UserCreate, UserLogin, UserOut
+from schemas.user_schema import UserCreate, UserLogin, UserOut, UserOutWithToken
 from utils.auth_utils import create_access_token, hash_password, verify_password
 from utils.auth_utils import get_current_user
 
@@ -16,7 +16,7 @@ from utils.auth_utils import get_current_user
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@auth_router.post("/signup", response_model=UserOut)
+@auth_router.post("/signup", response_model=UserOutWithToken)
 def signup(payload: UserCreate, response: Response, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.email == payload.email.lower()).first()
     if existing:
@@ -32,6 +32,8 @@ def signup(payload: UserCreate, response: Response, db: Session = Depends(get_db
     db.refresh(user)
 
     token = create_access_token(subject=str(user.id), expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+
+    # Also set cookie for local dev convenience (not relied upon in production).
     response.set_cookie(
         key=settings.COOKIE_NAME,
         value=token,
@@ -41,10 +43,11 @@ def signup(payload: UserCreate, response: Response, db: Session = Depends(get_db
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
-    return user
+
+    return {**user.__dict__, "token": token}
 
 
-@auth_router.post("/login", response_model=UserOut)
+@auth_router.post("/login", response_model=UserOutWithToken)
 def login(payload: UserLogin, response: Response, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == payload.email.lower()).first()
     if not user or not verify_password(payload.password, user.password_hash):
@@ -52,6 +55,7 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
 
     token = create_access_token(subject=str(user.id), expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
+    # Also set cookie for local dev convenience (not relied upon in production).
     response.set_cookie(
         key=settings.COOKIE_NAME,
         value=token,
@@ -62,7 +66,7 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
         path="/",
     )
 
-    return user
+    return {**user.__dict__, "token": token}
 
 
 @auth_router.post("/logout")

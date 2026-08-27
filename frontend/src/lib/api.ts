@@ -1,10 +1,15 @@
-function computeDefaultApiBase(): string {
-    // Derive backend host from the current page host so cookie SameSite=Lax works
-    // even when accessing the dev server via 127.0.0.1 or a LAN IP.
-    if (typeof window !== 'undefined' && window.location?.hostname) {
-        return `http://${window.location.hostname}:8000`;
-    }
-    return 'http://localhost:8000';
+const TOKEN_KEY = 'pl_token';
+
+export function getToken(): string | null {
+    return localStorage.getItem(TOKEN_KEY);
+}
+
+export function saveToken(token: string): void {
+    localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+    localStorage.removeItem(TOKEN_KEY);
 }
 
 export const API_BASE = 'https://photolensai.onrender.com';
@@ -18,13 +23,13 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
         headers.set('Content-Type', 'application/json');
     }
 
-    const res = await fetch(`${API_BASE}${path}`,
-        {
-            credentials: 'include',
-            ...init,
-            headers,
-        }
-    );
+    // Attach Bearer token from localStorage (works cross-domain, no cookie issues).
+    const token = getToken();
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
 
     if (!res.ok) {
         let detail = '';
